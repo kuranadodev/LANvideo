@@ -45,7 +45,7 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+MEDIAMTX_WEBRTC_URL=http://<server-ip>:8889/processed uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 也可以使用：
@@ -53,6 +53,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```bash
 bash scripts/run_backend.sh
 ```
+
+局域网内其它机器访问时，浏览器 WebRTC 地址必须使用服务器 IP。`MEDIAMTX_WEBRTC_URL` 未显式设置时，后端会尽量根据请求主机名把默认的 `127.0.0.1` 播放地址转换为浏览器可访问的服务器地址；也可以通过环境变量固定为 `http://<server-ip>:8889/processed`。
 
 ## 启动前端
 
@@ -98,7 +100,7 @@ sudo usermod -aG audio $USER
 
 ### MediaMTX 无画面
 
-确认已经点击“启动管线”，摄像头可用，FFmpeg 没有异常退出，并访问 `http://<server-ip>:8889/processed`。
+确认已经点击“启动管线”，摄像头可用，FFmpeg 没有异常退出，并访问 `http://<server-ip>:8889/processed`。如果视频区域显示 `127.0.0.1` 拒绝连接，说明浏览器正在访问客户端本机，请设置 `MEDIAMTX_WEBRTC_URL=http://<server-ip>:8889/processed` 后重启后端。
 
 ### 浏览器打不开 WebRTC 页面
 

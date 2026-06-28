@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from urllib.parse import urlsplit, urlunsplit
+
 from fastapi import APIRouter, Request
 
 from app.algorithms.video_dummy import DummyVideoAlgorithm
@@ -17,7 +18,26 @@ VIDEO_NAMES = [DummyVideoAlgorithm.name, MotionVideoAlgorithm.name]
 AUDIO_NAMES = ["fft"]
 
 
-def current_settings() -> AppSettings:
+def browser_webrtc_url(request: Request | None = None) -> str:
+    url = settings.mediamtx_webrtc_url
+    if request is None:
+        return url
+
+    parsed = urlsplit(url)
+    request_host = request.url.hostname
+    if parsed.hostname in {"127.0.0.1", "localhost", "0.0.0.0"} and request_host not in {
+        None,
+        "127.0.0.1",
+        "localhost",
+        "0.0.0.0",
+    }:
+        port = parsed.port or 8889
+        netloc = f"{request_host}:{port}"
+        return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+    return url
+
+
+def current_settings(request: Request | None = None) -> AppSettings:
     return AppSettings(
         video_device=settings.video_device,
         video_width=settings.video_width,
@@ -28,7 +48,7 @@ def current_settings() -> AppSettings:
         audio_sample_rate=settings.audio_sample_rate,
         audio_channels=settings.audio_channels,
         audio_block_size=settings.audio_block_size,
-        mediamtx_webrtc_url=settings.mediamtx_webrtc_url,
+        mediamtx_webrtc_url=browser_webrtc_url(request),
         video_algorithm=settings.video_algorithm,
         audio_algorithm=settings.audio_algorithm,
     )
@@ -42,8 +62,8 @@ def status(request: Request) -> dict:
 
 
 @router.get("/settings")
-def get_settings() -> AppSettings:
-    return current_settings()
+def get_settings(request: Request) -> AppSettings:
+    return current_settings(request)
 
 
 @router.post("/settings")
@@ -52,7 +72,7 @@ async def update_settings(new_settings: AppSettings, request: Request) -> dict:
         if hasattr(settings, key):
             setattr(settings, key, value)
     await request.app.state.event_bus.log("info", "设置已保存，重启管线后生效")
-    return {"settings": current_settings(), "requires_restart": True}
+    return {"settings": current_settings(request), "requires_restart": True}
 
 
 @router.get("/devices/video")
