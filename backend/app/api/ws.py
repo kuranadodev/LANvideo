@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 router = APIRouter()
 
 
 @router.websocket("/ws/events")
-async def events(websocket: WebSocket, request: Request) -> None:
+async def events(websocket: WebSocket) -> None:
     await websocket.accept()
-    queue = request.app.state.event_bus.subscribe()
+    event_bus = websocket.app.state.event_bus
+    queue = event_bus.subscribe()
     try:
         while True:
             message = await queue.get()
@@ -19,4 +20,4 @@ async def events(websocket: WebSocket, request: Request) -> None:
     except asyncio.CancelledError:
         raise
     finally:
-        request.app.state.event_bus.unsubscribe(queue)
+        event_bus.unsubscribe(queue)
