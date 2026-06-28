@@ -82,7 +82,7 @@ def video_devices() -> dict:
 
 @router.get("/devices/audio")
 def audio_devices() -> dict:
-    return {"devices": list_audio_devices()}
+    return {"devices": list_audio_devices(settings.audio_sample_rate, settings.audio_channels)}
 
 
 @router.post("/pipeline/start")
