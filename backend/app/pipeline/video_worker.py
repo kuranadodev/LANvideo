@@ -12,9 +12,10 @@ VIDEO_ALGORITHMS = {"dummy": DummyVideoAlgorithm, "motion": MotionVideoAlgorithm
 
 
 class VideoWorker:
-    def __init__(self, settings, event_bus) -> None:
+    def __init__(self, settings, event_bus, publisher: FFmpegPublisher) -> None:
         self.settings = settings
         self.event_bus = event_bus
+        self.publisher = publisher
         self.running = False
         self.error: str | None = None
         self.actual_fps = 0.0
@@ -87,7 +88,8 @@ class VideoWorker:
         algorithm = algo_cls()
         output_width = self.settings.video_width
         output_height = self.settings.video_height
-        publisher = FFmpegPublisher(self.settings.ffmpeg_path, self.settings.mediamtx_rtsp_url, output_width, output_height, self.settings.video_fps, self.settings.video_pix_fmt, lambda line: self._threadsafe_log("info", f"FFmpeg: {line}"))
+        publisher = self.publisher
+        publisher.on_log = lambda line: self._threadsafe_log("info", f"FFmpeg: {line}")
         try:
             publisher.start()
             self.running = True

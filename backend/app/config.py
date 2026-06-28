@@ -25,6 +25,7 @@ class Settings:
     audio_sample_rate: int = _int("AUDIO_SAMPLE_RATE", 48000)
     audio_channels: int = _int("AUDIO_CHANNELS", 1)
     audio_block_size: int = _int("AUDIO_BLOCK_SIZE", 1024)
+    audio_playback_gain: float = float(os.getenv("AUDIO_PLAYBACK_GAIN", "3.0"))
     mediamtx_rtsp_url: str = os.getenv("MEDIAMTX_RTSP_URL", "rtsp://127.0.0.1:8554/processed")
     mediamtx_webrtc_url: str = os.getenv("MEDIAMTX_WEBRTC_URL", "http://127.0.0.1:8889/processed")
     ffmpeg_path: str = os.getenv("FFMPEG_PATH", "ffmpeg")
