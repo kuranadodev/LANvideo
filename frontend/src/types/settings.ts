@@ -1,0 +1,2 @@
+export type AppSettings = { video_device: string; video_width: number; video_height: number; video_fps: number; video_fourcc?: string | null; audio_device?: number | string | null; audio_sample_rate: number; audio_channels: number; audio_block_size: number; mediamtx_webrtc_url: string; video_algorithm: string; audio_algorithm: string };
+export type Device = { id: string | number | null; name: string; available: boolean; channels?: number; default_sample_rate?: number; stable?: boolean };

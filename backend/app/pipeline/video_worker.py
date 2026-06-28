@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import asyncio
+import time
+import cv2
+
+from app.algorithms.video_dummy import DummyVideoAlgorithm
+from app.algorithms.video_motion import MotionVideoAlgorithm
+from app.pipeline.ffmpeg_publisher import FFmpegPublisher
+
+VIDEO_ALGORITHMS = {"dummy": DummyVideoAlgorithm, "motion": MotionVideoAlgorithm}
+
+
+class VideoWorker:
+    def __init__(self, settings, event_bus) -> None:
+        self.settings = settings
+        self.event_bus = event_bus
+        self.running = False
+        self.error: str | None = None
+        self.actual_fps = 0.0
+        self._task: asyncio.Task | None = None
+        self._stop = False
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def start(self) -> None:
+        if self.running:
+            return
+        self._loop = asyncio.get_running_loop()
+        self._stop = False
+        self.error = None
+        self._task = asyncio.create_task(asyncio.to_thread(self._run))
+
+    async def stop(self) -> None:
+        self._stop = True
+        if self._task:
+            await asyncio.wait([self._task], timeout=5)
+        self.running = False
+
+    def _threadsafe_publish(self, message: dict) -> None:
+        if self._loop:
+            asyncio.run_coroutine_threadsafe(self.event_bus.publish(message), self._loop)
+
+    def _threadsafe_log(self, level: str, message: str) -> None:
+        if self._loop:
+            asyncio.run_coroutine_threadsafe(self.event_bus.log(level, message), self._loop)
+
+    def _run(self) -> None:
+        cap = cv2.VideoCapture(self.settings.video_device, cv2.CAP_V4L2)
+        if not cap.isOpened():
+            self.error = f"无法打开视频设备: {self.settings.video_device}"
+            self._threadsafe_log("error", self.error)
+            return
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.settings.video_width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.settings.video_height)
+        cap.set(cv2.CAP_PROP_FPS, self.settings.video_fps)
+        if self.settings.video_fourcc:
+            fourcc = cv2.VideoWriter_fourcc(*self.settings.video_fourcc[:4])
+            cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+        algo_cls = VIDEO_ALGORITHMS.get(self.settings.video_algorithm, DummyVideoAlgorithm)
+        algorithm = algo_cls()
+        publisher = FFmpegPublisher(self.settings.ffmpeg_path, self.settings.mediamtx_rtsp_url, self.settings.video_width, self.settings.video_height, self.settings.video_fps, self.settings.video_pix_fmt, lambda line: self._threadsafe_log("info", f"FFmpeg: {line}"))
+        try:
+            publisher.start()
+            self.running = True
+            self._threadsafe_log("info", "视频管线已启动")
+            frame_index = 0
+            last = time.monotonic()
+            while not self._stop:
+                ok, frame = cap.read()
+                if not ok:
+                    self.error = "读取视频帧失败"
+                    self._threadsafe_log("error", self.error)
+                    time.sleep(0.2)
+                    continue
+                start = time.monotonic()
+                result = algorithm.process(frame)
+                algorithm_ms = (time.monotonic() - start) * 1000
+                publisher.write_frame(result.frame)
+                frame_index += 1
+                now = time.monotonic()
+                dt = now - last
+                last = now
+                if dt > 0:
+                    fps = 1.0 / dt
+                    self.actual_fps = 0.9 * self.actual_fps + 0.1 * fps if self.actual_fps else fps
+                self._threadsafe_publish({"type": "video.metrics", "fps": self.actual_fps, "frame_index": frame_index, "algorithm_ms": algorithm_ms, "width": self.settings.video_width, "height": self.settings.video_height})
+                self._threadsafe_publish({"type": "detection.boxes", "frame_index": frame_index, "boxes": [box.to_dict() for box in result.boxes]})
+        except Exception as exc:
+            self.error = str(exc)
+            self._threadsafe_log("error", f"视频管线异常: {exc}")
+        finally:
+            publisher.stop()
+            cap.release()
+            self.running = False
+            self._threadsafe_log("info", "视频管线已停止")
