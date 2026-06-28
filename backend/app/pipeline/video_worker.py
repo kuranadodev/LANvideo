@@ -44,18 +44,45 @@ class VideoWorker:
         if self._loop:
             asyncio.run_coroutine_threadsafe(self.event_bus.log(level, message), self._loop)
 
+    @staticmethod
+    def _normalize_fourcc(value: str | None) -> str:
+        code = (value or "").strip().upper()
+        if code == "MJPEG":
+            return "MJPG"
+        return code[:4]
+
+    @staticmethod
+    def _decode_fourcc(value: float) -> str:
+        try:
+            code = int(value)
+        except (TypeError, ValueError):
+            return ""
+        chars = [chr((code >> 8 * i) & 0xFF) for i in range(4)]
+        return "".join(ch for ch in chars if ch.isprintable()).strip()
+
     def _run(self) -> None:
         cap = cv2.VideoCapture(self.settings.video_device, cv2.CAP_V4L2)
         if not cap.isOpened():
             self.error = f"无法打开视频设备: {self.settings.video_device}"
             self._threadsafe_log("error", self.error)
             return
+        requested_fourcc = self._normalize_fourcc(self.settings.video_fourcc)
+        if requested_fourcc:
+            fourcc = cv2.VideoWriter_fourcc(*requested_fourcc)
+            cap.set(cv2.CAP_PROP_FOURCC, fourcc)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.settings.video_width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.settings.video_height)
         cap.set(cv2.CAP_PROP_FPS, self.settings.video_fps)
-        if self.settings.video_fourcc:
-            fourcc = cv2.VideoWriter_fourcc(*self.settings.video_fourcc[:4])
-            cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+        actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        actual_fps = cap.get(cv2.CAP_PROP_FPS)
+        actual_fourcc = self._decode_fourcc(cap.get(cv2.CAP_PROP_FOURCC))
+        requested_format = requested_fourcc or "默认"
+        self._threadsafe_log(
+            "info",
+            f"摄像头请求参数: {requested_format} {self.settings.video_width}x{self.settings.video_height}@{self.settings.video_fps}; "
+            f"实际协商: {actual_fourcc or '未知'} {actual_width}x{actual_height}@{actual_fps:.2f}",
+        )
         algo_cls = VIDEO_ALGORITHMS.get(self.settings.video_algorithm, DummyVideoAlgorithm)
         algorithm = algo_cls()
         output_width = self.settings.video_width
