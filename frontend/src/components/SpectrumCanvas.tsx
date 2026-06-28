@@ -1,0 +1,2 @@
+import { useEffect, useRef } from 'react';
+export function SpectrumCanvas({ magnitudes }: { magnitudes: number[] }) { const ref = useRef<HTMLCanvasElement>(null); useEffect(() => { const c = ref.current; if (!c) return; c.width = c.clientWidth; c.height = c.clientHeight; const ctx = c.getContext('2d')!; ctx.clearRect(0,0,c.width,c.height); ctx.fillStyle='#90be6d'; const w=c.width/Math.max(1,magnitudes.length); magnitudes.forEach((m,i)=>ctx.fillRect(i*w,c.height-m*c.height,w*0.8,m*c.height)); }, [magnitudes]); return <canvas className="plot" ref={ref}/>; }

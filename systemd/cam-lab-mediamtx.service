@@ -1,0 +1,12 @@
+[Unit]
+Description=Cam Lab MediaMTX
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/cam-lab/mediamtx
+ExecStart=/usr/local/bin/mediamtx /opt/cam-lab/mediamtx/mediamtx.yml
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
