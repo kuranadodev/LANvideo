@@ -3,14 +3,16 @@ from __future__ import annotations
 from app.config import settings
 from app.pipeline.audio_worker import AudioWorker
 from app.pipeline.event_bus import EventBus
+from app.pipeline.ffmpeg_publisher import FFmpegPublisher
 from app.pipeline.video_worker import VideoWorker
 
 
 class PipelineManager:
     def __init__(self, event_bus: EventBus) -> None:
         self.event_bus = event_bus
-        self.video_worker = VideoWorker(settings, event_bus)
-        self.audio_worker = AudioWorker(settings, event_bus)
+        self.publisher = self._build_publisher()
+        self.video_worker = VideoWorker(settings, event_bus, self.publisher)
+        self.audio_worker = AudioWorker(settings, event_bus, self.publisher)
 
     async def start(self) -> dict:
         await self.event_bus.log("info", "正在启动管线")
@@ -31,9 +33,23 @@ class PipelineManager:
         self.rebuild_workers()
         return await self.start()
 
+    def _build_publisher(self) -> FFmpegPublisher:
+        return FFmpegPublisher(
+            settings.ffmpeg_path,
+            settings.mediamtx_rtsp_url,
+            settings.video_width,
+            settings.video_height,
+            settings.video_fps,
+            settings.video_pix_fmt,
+            settings.audio_sample_rate,
+            settings.audio_channels,
+            settings.audio_playback_gain,
+        )
+
     def rebuild_workers(self) -> None:
-        self.video_worker = VideoWorker(settings, self.event_bus)
-        self.audio_worker = AudioWorker(settings, self.event_bus)
+        self.publisher = self._build_publisher()
+        self.video_worker = VideoWorker(settings, self.event_bus, self.publisher)
+        self.audio_worker = AudioWorker(settings, self.event_bus, self.publisher)
 
     def status(self) -> dict:
         running = self.video_worker.running or self.audio_worker.running
@@ -44,6 +60,6 @@ class PipelineManager:
             "running": running,
             "state": state,
             "video": {"running": self.video_worker.running, "device": settings.video_device, "width": settings.video_width, "height": settings.video_height, "fps": settings.video_fps, "actual_fps": self.video_worker.actual_fps, "error": self.video_worker.error},
-            "audio": {"running": self.audio_worker.running, "device": settings.audio_device, "sample_rate": settings.audio_sample_rate, "channels": settings.audio_channels, "block_size": settings.audio_block_size, "error": self.audio_worker.error},
+            "audio": {"running": self.audio_worker.running, "device": settings.audio_device, "sample_rate": settings.audio_sample_rate, "channels": settings.audio_channels, "block_size": settings.audio_block_size, "playback_gain": settings.audio_playback_gain, "error": self.audio_worker.error},
             "mediamtx": {"rtsp_url": settings.mediamtx_rtsp_url, "webrtc_url": settings.mediamtx_webrtc_url},
         }

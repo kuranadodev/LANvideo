@@ -8,9 +8,10 @@ from app.algorithms.audio_fft import FftAudioAlgorithm
 
 
 class AudioWorker:
-    def __init__(self, settings, event_bus) -> None:
+    def __init__(self, settings, event_bus, publisher=None) -> None:
         self.settings = settings
         self.event_bus = event_bus
+        self.publisher = publisher
         self.running = False
         self.error: str | None = None
         self._task: asyncio.Task | None = None
@@ -90,6 +91,8 @@ class AudioWorker:
             try:
                 while not self._stop:
                     data, _ = stream.read(self.settings.audio_block_size)
+                    if self.publisher:
+                        self.publisher.write_audio(data)
                     now = time.monotonic()
                     if now - last_push < 0.07:
                         continue

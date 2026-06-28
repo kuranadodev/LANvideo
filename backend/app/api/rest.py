@@ -48,6 +48,7 @@ def current_settings(request: Request | None = None) -> AppSettings:
         audio_sample_rate=settings.audio_sample_rate,
         audio_channels=settings.audio_channels,
         audio_block_size=settings.audio_block_size,
+        audio_playback_gain=settings.audio_playback_gain,
         mediamtx_webrtc_url=browser_webrtc_url(request),
         video_algorithm=settings.video_algorithm,
         audio_algorithm=settings.audio_algorithm,
