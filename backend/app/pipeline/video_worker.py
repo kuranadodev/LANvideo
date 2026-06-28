@@ -58,13 +58,16 @@ class VideoWorker:
             cap.set(cv2.CAP_PROP_FOURCC, fourcc)
         algo_cls = VIDEO_ALGORITHMS.get(self.settings.video_algorithm, DummyVideoAlgorithm)
         algorithm = algo_cls()
-        publisher = FFmpegPublisher(self.settings.ffmpeg_path, self.settings.mediamtx_rtsp_url, self.settings.video_width, self.settings.video_height, self.settings.video_fps, self.settings.video_pix_fmt, lambda line: self._threadsafe_log("info", f"FFmpeg: {line}"))
+        output_width = self.settings.video_width
+        output_height = self.settings.video_height
+        publisher = FFmpegPublisher(self.settings.ffmpeg_path, self.settings.mediamtx_rtsp_url, output_width, output_height, self.settings.video_fps, self.settings.video_pix_fmt, lambda line: self._threadsafe_log("info", f"FFmpeg: {line}"))
         try:
             publisher.start()
             self.running = True
             self._threadsafe_log("info", "视频管线已启动")
             frame_index = 0
             last = time.monotonic()
+            logged_resize = False
             while not self._stop:
                 ok, frame = cap.read()
                 if not ok:
@@ -72,9 +75,19 @@ class VideoWorker:
                     self._threadsafe_log("error", self.error)
                     time.sleep(0.2)
                     continue
+                frame_height, frame_width = frame.shape[:2]
+                if frame_width != output_width or frame_height != output_height:
+                    if not logged_resize:
+                        self._threadsafe_log("warning", f"摄像头实际输出 {frame_width}x{frame_height}，已缩放为 {output_width}x{output_height} 后推流")
+                        logged_resize = True
+                    frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_AREA)
                 start = time.monotonic()
                 result = algorithm.process(frame)
                 algorithm_ms = (time.monotonic() - start) * 1000
+                if result.frame.shape[:2] != (output_height, output_width):
+                    actual_height, actual_width = result.frame.shape[:2]
+                    self._threadsafe_log("warning", f"算法输出尺寸 {actual_width}x{actual_height} 与推流尺寸不一致，已缩放为 {output_width}x{output_height}")
+                    result.frame = cv2.resize(result.frame, (output_width, output_height), interpolation=cv2.INTER_AREA)
                 publisher.write_frame(result.frame)
                 frame_index += 1
                 now = time.monotonic()
@@ -83,7 +96,7 @@ class VideoWorker:
                 if dt > 0:
                     fps = 1.0 / dt
                     self.actual_fps = 0.9 * self.actual_fps + 0.1 * fps if self.actual_fps else fps
-                self._threadsafe_publish({"type": "video.metrics", "fps": self.actual_fps, "frame_index": frame_index, "algorithm_ms": algorithm_ms, "width": self.settings.video_width, "height": self.settings.video_height})
+                self._threadsafe_publish({"type": "video.metrics", "fps": self.actual_fps, "frame_index": frame_index, "algorithm_ms": algorithm_ms, "width": output_width, "height": output_height})
                 self._threadsafe_publish({"type": "detection.boxes", "frame_index": frame_index, "boxes": [box.to_dict() for box in result.boxes]})
         except Exception as exc:
             self.error = str(exc)

@@ -35,6 +35,14 @@ class FFmpegPublisher:
     def write_frame(self, frame: np.ndarray) -> None:
         if not self.process or not self.process.stdin or self.process.poll() is not None:
             raise BrokenPipeError("FFmpeg 未运行")
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            raise ValueError(f"FFmpeg 需要 3 通道 BGR 帧，实际 shape={frame.shape}")
+        frame_height, frame_width = frame.shape[:2]
+        if frame_width != self.width or frame_height != self.height:
+            raise ValueError(f"FFmpeg 帧尺寸不匹配: 期望 {self.width}x{self.height}, 实际 {frame_width}x{frame_height}")
+        if self.pix_fmt != "bgr24":
+            raise ValueError(f"当前仅支持 bgr24 输入像素格式，实际 pix_fmt={self.pix_fmt}")
+        frame = np.ascontiguousarray(frame)
         self.process.stdin.write(frame.tobytes())
 
     def stop(self) -> None:
