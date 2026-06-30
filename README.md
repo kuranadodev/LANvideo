@@ -112,4 +112,36 @@ sudo usermod -aG audio $USER
 
 ### CPU 占用过高
 
-降低分辨率、帧率，减少运动检测复杂度。第一版不默认启用 NVENC。
+优先降低分辨率、帧率，减少运动检测复杂度。若主机安装了 NVIDIA GPU、驱动和带 NVENC 的 FFmpeg，可以启用硬件视频编码来降低 CPU 编码开销：
+
+```bash
+VIDEO_ENCODER=h264_nvenc bash scripts/run_backend.sh
+```
+
+也可以设置可选参数：
+
+```bash
+VIDEO_ENCODER=h264_nvenc VIDEO_ENCODER_PRESET=p1 VIDEO_BITRATE=4M bash scripts/run_backend.sh
+```
+
+确认 FFmpeg 是否支持 NVENC：
+
+```bash
+ffmpeg -hide_banner -encoders | grep h264_nvenc
+```
+
+确认 NVIDIA GPU 是否可见：
+
+```bash
+nvidia-smi
+```
+
+注意：启用 `h264_nvenc` 只会把视频编码转到 NVIDIA 编码器。当前摄像头采集、Python/OpenCV 图像算法、BGR 帧写入 FFmpeg 的流程仍在 CPU 上。OpenCV CUDA 能力会在后端状态接口和状态面板中显示，但默认算法仍不依赖 CUDA。
+
+### 音频指标占用过高
+
+音频 FFT 默认在 CPU 上计算，并约每 70ms 推送一次波形/频谱/指标。可以通过 `AUDIO_METRICS_INTERVAL_MS` 降低推送频率，例如：
+
+```bash
+AUDIO_METRICS_INTERVAL_MS=200 bash scripts/run_backend.sh
+```

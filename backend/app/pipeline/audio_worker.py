@@ -6,6 +6,8 @@ import numpy as np
 
 from app.algorithms.audio_fft import FftAudioAlgorithm
 
+AUDIO_ALGORITHMS = {"fft": FftAudioAlgorithm}
+
 
 class AudioWorker:
     def __init__(self, settings, event_bus, publisher=None) -> None:
@@ -57,7 +59,10 @@ class AudioWorker:
     def _run(self) -> None:
         try:
             import sounddevice as sd
-            algorithm = FftAudioAlgorithm()
+            algo_cls = AUDIO_ALGORITHMS.get(self.settings.audio_algorithm, FftAudioAlgorithm)
+            if algo_cls is FftAudioAlgorithm and self.settings.audio_algorithm not in AUDIO_ALGORITHMS:
+                self._log("warning", f"未知音频算法 {self.settings.audio_algorithm}，已回退到 fft")
+            algorithm = algo_cls()
             device = self.settings.audio_device
             if isinstance(device, str) and device.isdigit():
                 device = int(device)
@@ -94,7 +99,7 @@ class AudioWorker:
                     if self.publisher:
                         self.publisher.write_audio(data)
                     now = time.monotonic()
-                    if now - last_push < 0.07:
+                    if now - last_push < self.settings.audio_metrics_interval_ms / 1000.0:
                         continue
                     last_push = now
                     mono = np.mean(data, axis=1) if data.ndim > 1 else data.reshape(-1)
