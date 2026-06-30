@@ -8,6 +8,7 @@
 - `GET /api/devices/video`
 - `GET /api/devices/audio`
 - `POST /api/pipeline/start`
+- `POST /api/pipeline/apply-start`
 - `POST /api/pipeline/stop`
 - `POST /api/pipeline/restart`
 - `GET /api/algorithms/video`

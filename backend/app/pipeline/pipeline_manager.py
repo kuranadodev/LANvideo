@@ -16,10 +16,13 @@ class PipelineManager:
         self.audio_worker = AudioWorker(settings, event_bus, self.publisher)
 
     async def start(self) -> dict:
+        running = self.video_worker.running or self.audio_worker.running
+        if running:
+            await self.event_bus.log("info", "管线运行中，正在停止后重新启动")
+            await self.stop()
         await self.event_bus.log("info", "正在启动管线")
         await self._log_capability_summary()
-        if not (self.video_worker.running or self.audio_worker.running):
-            self.rebuild_workers()
+        self.rebuild_workers()
         await self.video_worker.start()
         await self.audio_worker.start()
         return self.status()
