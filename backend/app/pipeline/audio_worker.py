@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 import time
 import numpy as np
 
@@ -23,6 +24,8 @@ class AudioWorker:
     async def start(self) -> None:
         if self.running:
             return
+        if self._task and not self._task.done():
+            return
         self._loop = asyncio.get_running_loop()
         self._stop = False
         self.error = None
@@ -30,17 +33,32 @@ class AudioWorker:
 
     async def stop(self) -> None:
         self._stop = True
-        if self._task:
-            await asyncio.wait([self._task], timeout=5)
-        self.running = False
+        if self._task and not self._task.done():
+            done, _ = await asyncio.wait([self._task], timeout=5)
+            if done:
+                self._task = None
+        elif self._task:
+            self._task = None
+        if not self._task:
+            self.running = False
+
+    def _submit_to_loop(self, coro: Coroutine) -> None:
+        if not self._loop or self._loop.is_closed():
+            coro.close()
+            return
+        try:
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            future.add_done_callback(lambda item: item.exception())
+        except RuntimeError:
+            coro.close()
 
     def _publish(self, message: dict) -> None:
-        if self._loop:
-            asyncio.run_coroutine_threadsafe(self.event_bus.publish(message), self._loop)
+        if self._loop and not self._loop.is_closed():
+            self._submit_to_loop(self.event_bus.publish(message))
 
     def _log(self, level: str, message: str) -> None:
-        if self._loop:
-            asyncio.run_coroutine_threadsafe(self.event_bus.log(level, message), self._loop)
+        if self._loop and not self._loop.is_closed():
+            self._submit_to_loop(self.event_bus.log(level, message))
 
     @staticmethod
     def _is_invalid_sample_rate_error(exc: Exception) -> bool:

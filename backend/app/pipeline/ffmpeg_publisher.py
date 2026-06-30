@@ -46,6 +46,7 @@ class FFmpegPublisher:
         self._audio_lock = threading.Lock()
         self._last_audio_write = 0.0
         self._silence_thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
         self._recent_stderr: deque[str] = deque(maxlen=40)
 
     def _video_encoder_args(self) -> list[str]:
@@ -149,7 +150,8 @@ class FFmpegPublisher:
         self._last_audio_write = time.monotonic()
         self._silence_thread = threading.Thread(target=self._write_silence_when_idle, daemon=True)
         self._silence_thread.start()
-        threading.Thread(target=self._drain_stderr, daemon=True).start()
+        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._stderr_thread.start()
 
     def _drain_stderr(self) -> None:
         if not self.process or not self.process.stderr:
@@ -211,23 +213,30 @@ class FFmpegPublisher:
             time.sleep(0.05)
 
     def stop(self) -> None:
+        self.on_log = None
         if self._audio_pipe:
             try:
                 self._audio_pipe.close()
             except Exception:
                 pass
             self._audio_pipe = None
-        if not self.process:
-            return
-        if self.process.stdin:
-            try:
-                self.process.stdin.close()
-            except Exception:
-                pass
-        if self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-        self.process = None
+        if self.process:
+            if self.process.stdin:
+                try:
+                    self.process.stdin.close()
+                except Exception:
+                    pass
+            if self.process.poll() is None:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=3)
+            self.process = None
+        if self._silence_thread and self._silence_thread.is_alive():
+            self._silence_thread.join(timeout=1)
+        self._silence_thread = None
+        if self._stderr_thread and self._stderr_thread.is_alive():
+            self._stderr_thread.join(timeout=1)
+        self._stderr_thread = None
