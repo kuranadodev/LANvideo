@@ -17,4 +17,5 @@ export type AppSettings = {
   video_algorithm: string;
   audio_algorithm: string;
 };
-export type Device = { id: string | number | null; name: string; available: boolean; channels?: number; max_channels?: number; default_sample_rate?: number; supported_sample_rates?: number[]; max_sample_rate?: number | null; supports_configured_sample_rate?: boolean; sample_rate_error?: string | null; sample_rate_errors?: Record<number, string>; stable?: boolean };
+export type VideoFormat = { fourcc: string; label?: string };
+export type Device = { id: string | number | null; name: string; available: boolean; channels?: number; max_channels?: number; default_sample_rate?: number; supported_sample_rates?: number[]; max_sample_rate?: number | null; supports_configured_sample_rate?: boolean; sample_rate_error?: string | null; sample_rate_errors?: Record<number, string>; stable?: boolean; formats?: VideoFormat[]; format_error?: string | null };
