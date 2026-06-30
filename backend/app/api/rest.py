@@ -71,14 +71,18 @@ def get_settings(request: Request) -> AppSettings:
     return current_settings(request)
 
 
-@router.post("/settings")
-async def update_settings(new_settings: AppSettings, request: Request) -> dict:
+def apply_settings(new_settings: AppSettings) -> None:
     ok, error = is_video_format_supported(new_settings.video_device, new_settings.video_fourcc)
     if not ok:
         raise HTTPException(status_code=400, detail=error)
     for key, value in new_settings.model_dump().items():
         if hasattr(settings, key):
             setattr(settings, key, value)
+
+
+@router.post("/settings")
+async def update_settings(new_settings: AppSettings, request: Request) -> dict:
+    apply_settings(new_settings)
     await request.app.state.event_bus.log("info", "设置已保存，重启管线后生效")
     return {"settings": current_settings(request), "requires_restart": True}
 
@@ -95,6 +99,13 @@ def audio_devices() -> dict:
 
 @router.post("/pipeline/start")
 async def start_pipeline(request: Request) -> dict:
+    return await request.app.state.pipeline.start()
+
+
+@router.post("/pipeline/apply-start")
+async def apply_start_pipeline(new_settings: AppSettings, request: Request) -> dict:
+    apply_settings(new_settings)
+    await request.app.state.event_bus.log("info", "已应用当前设置，正在启动管线")
     return await request.app.state.pipeline.start()
 
 
