@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from app.algorithms.video_dummy import DummyVideoAlgorithm
 from app.algorithms.video_motion import MotionVideoAlgorithm
 from app.config import settings
-from app.devices.camera import list_video_devices
+from app.devices.camera import is_video_format_supported, list_video_devices
 from app.devices.microphone import list_audio_devices
 from app.schemas.messages import AlgorithmSelectRequest
 from app.schemas.settings import AppSettings
@@ -73,6 +73,9 @@ def get_settings(request: Request) -> AppSettings:
 
 @router.post("/settings")
 async def update_settings(new_settings: AppSettings, request: Request) -> dict:
+    ok, error = is_video_format_supported(new_settings.video_device, new_settings.video_fourcc)
+    if not ok:
+        raise HTTPException(status_code=400, detail=error)
     for key, value in new_settings.model_dump().items():
         if hasattr(settings, key):
             setattr(settings, key, value)

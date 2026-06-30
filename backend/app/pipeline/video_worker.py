@@ -66,8 +66,10 @@ class VideoWorker:
     @staticmethod
     def _normalize_fourcc(value: str | None) -> str:
         code = (value or "").strip().upper()
-        if code == "MJPEG":
+        if code in {"MJPEG", "JPEG"}:
             return "MJPG"
+        if code in {"H.264", "X264", "AVC1"}:
+            return "H264"
         return code[:4]
 
     @staticmethod
