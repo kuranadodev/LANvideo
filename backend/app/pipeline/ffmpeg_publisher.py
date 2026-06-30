@@ -4,6 +4,7 @@ import os
 import subprocess
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 
 import numpy as np
@@ -21,6 +22,9 @@ class FFmpegPublisher:
         audio_sample_rate: int,
         audio_channels: int,
         audio_gain: float,
+        video_encoder: str = "libx264",
+        video_encoder_preset: str | None = None,
+        video_bitrate: str | None = None,
         on_log: Callable[[str], None] | None = None,
     ) -> None:
         self.ffmpeg_path = ffmpeg_path
@@ -32,6 +36,9 @@ class FFmpegPublisher:
         self.audio_sample_rate = audio_sample_rate
         self.audio_channels = audio_channels
         self.audio_gain = audio_gain
+        self.video_encoder = video_encoder
+        self.video_encoder_preset = video_encoder_preset
+        self.video_bitrate = video_bitrate
         self.on_log = on_log
         self.process: subprocess.Popen | None = None
         self._audio_pipe = None
@@ -39,6 +46,61 @@ class FFmpegPublisher:
         self._audio_lock = threading.Lock()
         self._last_audio_write = 0.0
         self._silence_thread: threading.Thread | None = None
+        self._recent_stderr: deque[str] = deque(maxlen=40)
+
+    def _video_encoder_args(self) -> list[str]:
+        encoder = (self.video_encoder or "libx264").strip()
+        if encoder == "libx264":
+            args = [
+                "-c:v",
+                "libx264",
+                "-preset",
+                self.video_encoder_preset or "ultrafast",
+                "-tune",
+                "zerolatency",
+                "-pix_fmt",
+                "yuv420p",
+                "-profile:v",
+                "baseline",
+                "-g",
+                str(self.fps),
+                "-bf",
+                "0",
+            ]
+        elif encoder == "h264_nvenc":
+            args = [
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                self.video_encoder_preset or "p1",
+                "-tune",
+                "ull",
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                str(self.fps),
+                "-bf",
+                "0",
+            ]
+        else:
+            raise ValueError(f"不支持的视频编码器: {encoder}")
+        if self.video_bitrate:
+            args.extend(["-b:v", self.video_bitrate])
+        return args
+
+    def _recent_error_context(self) -> str:
+        if not self._recent_stderr:
+            return ""
+        text = "\n".join(self._recent_stderr)
+        hint = ""
+        lower = text.lower()
+        if "unknown encoder" in lower and "h264_nvenc" in lower:
+            hint = "；当前 FFmpeg 可能未编译 h264_nvenc 编码器"
+        elif "cannot load libcuda" in lower or "libcuda" in lower:
+            hint = "；无法加载 CUDA 驱动库，请检查 NVIDIA 驱动"
+        elif "no capable devices" in lower:
+            hint = "；未发现可用的 NVIDIA 编码设备"
+        return f"；最近 FFmpeg 输出{hint}: {text}"
 
     def start(self) -> None:
         self.stop()
@@ -67,20 +129,7 @@ class FFmpegPublisher:
             str(self.audio_channels),
             "-i",
             f"pipe:{audio_read_fd}",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-tune",
-            "zerolatency",
-            "-pix_fmt",
-            "yuv420p",
-            "-profile:v",
-            "baseline",
-            "-g",
-            str(self.fps),
-            "-bf",
-            "0",
+            *self._video_encoder_args(),
             "-c:a",
             "libopus",
             "-b:a",
@@ -96,6 +145,7 @@ class FFmpegPublisher:
             self._audio_pipe = os.fdopen(audio_write_fd, "wb", buffering=0)
         finally:
             os.close(audio_read_fd)
+        self._recent_stderr.clear()
         self._last_audio_write = time.monotonic()
         self._silence_thread = threading.Thread(target=self._write_silence_when_idle, daemon=True)
         self._silence_thread.start()
@@ -106,12 +156,14 @@ class FFmpegPublisher:
             return
         for raw in self.process.stderr:
             line = raw.decode(errors="replace").strip()
-            if line and self.on_log:
-                self.on_log(line)
+            if line:
+                self._recent_stderr.append(line)
+                if self.on_log:
+                    self.on_log(line)
 
     def write_frame(self, frame: np.ndarray) -> None:
         if not self.process or not self.process.stdin or self.process.poll() is not None:
-            raise BrokenPipeError("FFmpeg 未运行")
+            raise BrokenPipeError(f"FFmpeg 未运行{self._recent_error_context()}")
         if frame.ndim != 3 or frame.shape[2] != 3:
             raise ValueError(f"FFmpeg 需要 3 通道 BGR 帧，实际 shape={frame.shape}")
         frame_height, frame_width = frame.shape[:2]

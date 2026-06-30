@@ -5,6 +5,7 @@ from app.pipeline.audio_worker import AudioWorker
 from app.pipeline.event_bus import EventBus
 from app.pipeline.ffmpeg_publisher import FFmpegPublisher
 from app.pipeline.video_worker import VideoWorker
+from app.utils.system_info import get_capability_info
 
 
 class PipelineManager:
@@ -16,6 +17,7 @@ class PipelineManager:
 
     async def start(self) -> dict:
         await self.event_bus.log("info", "正在启动管线")
+        await self._log_capability_summary()
         if not (self.video_worker.running or self.audio_worker.running):
             self.rebuild_workers()
         await self.video_worker.start()
@@ -33,6 +35,21 @@ class PipelineManager:
         self.rebuild_workers()
         return await self.start()
 
+
+    async def _log_capability_summary(self) -> None:
+        capabilities = get_capability_info()
+        ffmpeg = capabilities.get("ffmpeg", {})
+        opencv = capabilities.get("opencv", {})
+        nvidia = capabilities.get("nvidia_smi", {})
+        gpu_names = ", ".join(gpu.get("name", "unknown") for gpu in nvidia.get("gpus", [])) or "未检测到"
+        await self.event_bus.log(
+            "info",
+            f"系统能力: encoder={settings.video_encoder}, ffmpeg_nvenc={ffmpeg.get('has_h264_nvenc')}, "
+            f"opencv_cuda_devices={opencv.get('cuda_device_count', 0)}, nvidia_gpus={gpu_names}",
+        )
+        if settings.video_encoder == "h264_nvenc" and not ffmpeg.get("has_h264_nvenc"):
+            await self.event_bus.log("warning", "已选择 h264_nvenc，但当前 FFmpeg 未检测到 h264_nvenc 编码器")
+
     def _build_publisher(self) -> FFmpegPublisher:
         return FFmpegPublisher(
             settings.ffmpeg_path,
@@ -44,6 +61,9 @@ class PipelineManager:
             settings.audio_sample_rate,
             settings.audio_channels,
             settings.audio_playback_gain,
+            settings.video_encoder,
+            settings.video_encoder_preset,
+            settings.video_bitrate,
         )
 
     def rebuild_workers(self) -> None:
@@ -59,7 +79,7 @@ class PipelineManager:
         return {
             "running": running,
             "state": state,
-            "video": {"running": self.video_worker.running, "device": settings.video_device, "width": settings.video_width, "height": settings.video_height, "fps": settings.video_fps, "actual_fps": self.video_worker.actual_fps, "error": self.video_worker.error},
-            "audio": {"running": self.audio_worker.running, "device": settings.audio_device, "sample_rate": settings.audio_sample_rate, "channels": settings.audio_channels, "block_size": settings.audio_block_size, "playback_gain": settings.audio_playback_gain, "error": self.audio_worker.error},
+            "video": {"running": self.video_worker.running, "device": settings.video_device, "width": settings.video_width, "height": settings.video_height, "fps": settings.video_fps, "actual_fps": self.video_worker.actual_fps, "encoder": settings.video_encoder, "encoder_preset": settings.video_encoder_preset, "bitrate": settings.video_bitrate, "error": self.video_worker.error},
+            "audio": {"running": self.audio_worker.running, "device": settings.audio_device, "sample_rate": settings.audio_sample_rate, "channels": settings.audio_channels, "block_size": settings.audio_block_size, "playback_gain": settings.audio_playback_gain, "metrics_interval_ms": settings.audio_metrics_interval_ms, "error": self.audio_worker.error},
             "mediamtx": {"rtsp_url": settings.mediamtx_rtsp_url, "webrtc_url": settings.mediamtx_webrtc_url},
         }
