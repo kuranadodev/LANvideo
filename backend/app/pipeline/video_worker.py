@@ -82,11 +82,16 @@ class VideoWorker:
         return "".join(ch for ch in chars if ch.isprintable()).strip()
 
     def _run(self) -> None:
+        if getattr(self.settings, "video_pipeline_mode", "opencv") == "direct":
+            self._run_direct()
+            return
+
+        self._run_opencv()
+
+    def _open_capture(self):
         cap = cv2.VideoCapture(self.settings.video_device, cv2.CAP_V4L2)
         if not cap.isOpened():
-            self.error = f"无法打开视频设备: {self.settings.video_device}"
-            self._threadsafe_log("error", self.error)
-            return
+            raise RuntimeError(f"无法打开视频设备: {self.settings.video_device}")
         requested_fourcc = self._normalize_fourcc(self.settings.video_fourcc)
         if requested_fourcc:
             fourcc = cv2.VideoWriter_fourcc(*requested_fourcc)
@@ -104,6 +109,15 @@ class VideoWorker:
             f"摄像头请求参数: {requested_format} {self.settings.video_width}x{self.settings.video_height}@{self.settings.video_fps}; "
             f"实际协商: {actual_fourcc or '未知'} {actual_width}x{actual_height}@{actual_fps:.2f}",
         )
+        return cap
+
+    def _run_opencv(self) -> None:
+        try:
+            cap = self._open_capture()
+        except Exception as exc:
+            self.error = str(exc)
+            self._threadsafe_log("error", self.error)
+            return
         algo_cls = VIDEO_ALGORITHMS.get(self.settings.video_algorithm, DummyVideoAlgorithm)
         algorithm = algo_cls()
         output_width = self.settings.video_width
@@ -146,7 +160,7 @@ class VideoWorker:
                     fps = 1.0 / dt
                     self.actual_fps = 0.9 * self.actual_fps + 0.1 * fps if self.actual_fps else fps
                 self._threadsafe_publish({"type": "video.metrics", "fps": self.actual_fps, "frame_index": frame_index, "algorithm_ms": algorithm_ms, "width": output_width, "height": output_height})
-                self._threadsafe_publish({"type": "detection.boxes", "frame_index": frame_index, "boxes": [box.to_dict() for box in result.boxes]})
+                self._threadsafe_publish({"type": "detection.boxes", "frame_index": frame_index, "boxes": [box.to_dict() for box in result.boxes], "source_width": output_width, "source_height": output_height})
         except Exception as exc:
             self.error = str(exc)
             self._threadsafe_log("error", f"视频管线异常: {exc}")
@@ -155,3 +169,63 @@ class VideoWorker:
             cap.release()
             self.running = False
             self._threadsafe_log("info", "视频管线已停止")
+
+    def _run_direct(self) -> None:
+        output_width = self.settings.video_width
+        output_height = self.settings.video_height
+        analysis_fps = max(1, int(getattr(self.settings, "video_analysis_fps", 5)))
+        publisher = self.publisher
+        publisher.on_log = lambda line: self._threadsafe_log("info", f"FFmpeg: {line}")
+        cap = None
+        try:
+            publisher.start_v4l2(self.settings.video_device, self.settings.video_fourcc)
+            self.running = True
+            self._threadsafe_log("info", f"直推视频管线已启动，FFmpeg 直接采集 {self.settings.video_device}，OpenCV 分析 {analysis_fps}fps")
+            try:
+                cap = self._open_capture()
+            except Exception as exc:
+                self._threadsafe_log("warning", f"OpenCV 旁路分析未启动: {exc}；原始视频仍由 FFmpeg 直推")
+            algo_cls = VIDEO_ALGORITHMS.get(self.settings.video_algorithm, DummyVideoAlgorithm)
+            algorithm = algo_cls()
+            frame_index = 0
+            last = time.monotonic()
+            next_analysis = 0.0
+            while not self._stop:
+                if self.publisher.process and self.publisher.process.poll() is not None:
+                    raise BrokenPipeError(f"FFmpeg 已退出{self.publisher._recent_error_context()}")
+                now = time.monotonic()
+                if not cap:
+                    time.sleep(0.2)
+                    continue
+                if now < next_analysis:
+                    time.sleep(min(0.02, next_analysis - now))
+                    continue
+                next_analysis = now + 1.0 / analysis_fps
+                ok, frame = cap.read()
+                if not ok:
+                    self._threadsafe_log("warning", "OpenCV 旁路读取视频帧失败")
+                    time.sleep(0.2)
+                    continue
+                frame_height, frame_width = frame.shape[:2]
+                if frame_width != output_width or frame_height != output_height:
+                    frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_AREA)
+                start = time.monotonic()
+                result = algorithm.process(frame)
+                algorithm_ms = (time.monotonic() - start) * 1000
+                frame_index += 1
+                dt = now - last
+                last = now
+                if dt > 0:
+                    fps = 1.0 / dt
+                    self.actual_fps = 0.9 * self.actual_fps + 0.1 * fps if self.actual_fps else fps
+                self._threadsafe_publish({"type": "video.metrics", "fps": self.settings.video_fps, "analysis_fps": self.actual_fps, "frame_index": frame_index, "algorithm_ms": algorithm_ms, "width": output_width, "height": output_height})
+                self._threadsafe_publish({"type": "detection.boxes", "frame_index": frame_index, "boxes": [box.to_dict() for box in result.boxes], "source_width": output_width, "source_height": output_height})
+        except Exception as exc:
+            self.error = str(exc)
+            self._threadsafe_log("error", f"直推视频管线异常: {exc}")
+        finally:
+            publisher.stop()
+            if cap:
+                cap.release()
+            self.running = False
+            self._threadsafe_log("info", "直推视频管线已停止")

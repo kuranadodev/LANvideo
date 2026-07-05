@@ -6,6 +6,8 @@ class AppSettings(BaseModel):
     video_width: int = Field(1280, ge=1)
     video_height: int = Field(720, ge=1)
     video_fps: int = Field(20, ge=1, le=120)
+    video_analysis_fps: int = Field(5, ge=1, le=120)
+    video_pipeline_mode: str = Field("direct", pattern="^(direct|opencv)$")
     video_fourcc: str | None = None
     video_encoder: str = "libx264"
     video_encoder_preset: str | None = None

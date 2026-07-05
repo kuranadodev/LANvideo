@@ -52,37 +52,9 @@ class FFmpegPublisher:
     def _video_encoder_args(self) -> list[str]:
         encoder = (self.video_encoder or "libx264").strip()
         if encoder == "libx264":
-            args = [
-                "-c:v",
-                "libx264",
-                "-preset",
-                self.video_encoder_preset or "ultrafast",
-                "-tune",
-                "zerolatency",
-                "-pix_fmt",
-                "yuv420p",
-                "-profile:v",
-                "baseline",
-                "-g",
-                str(self.fps),
-                "-bf",
-                "0",
-            ]
+            args = ["-c:v", "libx264", "-preset", self.video_encoder_preset or "ultrafast", "-tune", "zerolatency", "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-g", str(self.fps), "-bf", "0"]
         elif encoder == "h264_nvenc":
-            args = [
-                "-c:v",
-                "h264_nvenc",
-                "-preset",
-                self.video_encoder_preset or "p1",
-                "-tune",
-                "ull",
-                "-pix_fmt",
-                "yuv420p",
-                "-g",
-                str(self.fps),
-                "-bf",
-                "0",
-            ]
+            args = ["-c:v", "h264_nvenc", "-preset", self.video_encoder_preset or "p1", "-tune", "ull", "-pix_fmt", "yuv420p", "-g", str(self.fps), "-bf", "0"]
         else:
             raise ValueError(f"不支持的视频编码器: {encoder}")
         if self.video_bitrate:
@@ -103,44 +75,24 @@ class FFmpegPublisher:
             hint = "；未发现可用的 NVIDIA 编码设备"
         return f"；最近 FFmpeg 输出{hint}: {text}"
 
-    def start(self) -> None:
-        self.stop()
-        audio_read_fd, audio_write_fd = os.pipe()
-        cmd = [
-            self.ffmpeg_path,
-            "-thread_queue_size",
-            "512",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            self.pix_fmt,
-            "-s",
-            f"{self.width}x{self.height}",
-            "-r",
-            str(self.fps),
-            "-i",
-            "-",
-            "-thread_queue_size",
-            "512",
-            "-f",
-            "f32le",
-            "-ar",
-            str(self.audio_sample_rate),
-            "-ac",
-            str(self.audio_channels),
-            "-i",
-            f"pipe:{audio_read_fd}",
-            *self._video_encoder_args(),
-            "-c:a",
-            "libopus",
-            "-b:a",
-            "96k",
-            "-af",
-            f"volume={self.audio_gain}",
-            "-f",
-            "rtsp",
-            self.rtsp_url,
-        ]
+    def _audio_input_args(self, audio_read_fd: int) -> list[str]:
+        return ["-thread_queue_size", "512", "-f", "f32le", "-ar", str(self.audio_sample_rate), "-ac", str(self.audio_channels), "-i", f"pipe:{audio_read_fd}"]
+
+    def _audio_output_args(self) -> list[str]:
+        return ["-c:a", "libopus", "-b:a", "96k", "-af", f"volume={self.audio_gain}"]
+
+    @staticmethod
+    def _v4l2_input_format(fourcc: str | None) -> str | None:
+        code = (fourcc or "").strip().upper()
+        if code in {"MJPG", "MJPEG", "JPEG"}:
+            return "mjpeg"
+        if code in {"YUYV", "YUY2"}:
+            return "yuyv422"
+        if code in {"H264", "H.264", "AVC1"}:
+            return "h264"
+        return fourcc.strip().lower() if fourcc else None
+
+    def _spawn(self, cmd: list[str], audio_read_fd: int, audio_write_fd: int) -> None:
         try:
             self.process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(audio_read_fd,))
             self._audio_pipe = os.fdopen(audio_write_fd, "wb", buffering=0)
@@ -152,6 +104,22 @@ class FFmpegPublisher:
         self._silence_thread.start()
         self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
         self._stderr_thread.start()
+
+    def start(self) -> None:
+        self.stop()
+        audio_read_fd, audio_write_fd = os.pipe()
+        cmd = [self.ffmpeg_path, "-thread_queue_size", "512", "-f", "rawvideo", "-pix_fmt", self.pix_fmt, "-s", f"{self.width}x{self.height}", "-r", str(self.fps), "-i", "-", *self._audio_input_args(audio_read_fd), *self._video_encoder_args(), *self._audio_output_args(), "-f", "rtsp", self.rtsp_url]
+        self._spawn(cmd, audio_read_fd, audio_write_fd)
+
+    def start_v4l2(self, device: str, fourcc: str | None = None) -> None:
+        self.stop()
+        audio_read_fd, audio_write_fd = os.pipe()
+        input_args = ["-thread_queue_size", "512", "-f", "v4l2", "-framerate", str(self.fps), "-video_size", f"{self.width}x{self.height}"]
+        input_format = self._v4l2_input_format(fourcc)
+        if input_format:
+            input_args.extend(["-input_format", input_format])
+        cmd = [self.ffmpeg_path, *input_args, "-i", device, *self._audio_input_args(audio_read_fd), *self._video_encoder_args(), *self._audio_output_args(), "-f", "rtsp", self.rtsp_url]
+        self._spawn(cmd, audio_read_fd, audio_write_fd)
 
     def _drain_stderr(self) -> None:
         if not self.process or not self.process.stderr:

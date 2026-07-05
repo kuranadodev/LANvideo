@@ -3,6 +3,8 @@ export type AppSettings = {
   video_width: number;
   video_height: number;
   video_fps: number;
+  video_analysis_fps: number;
+  video_pipeline_mode: string;
   video_fourcc?: string | null;
   video_encoder: string;
   video_encoder_preset?: string | null;
