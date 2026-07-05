@@ -19,6 +19,8 @@ class Settings:
     video_width: int = _int("VIDEO_WIDTH", 1280)
     video_height: int = _int("VIDEO_HEIGHT", 720)
     video_fps: int = _int("VIDEO_FPS", 20)
+    video_analysis_fps: int = _int("VIDEO_ANALYSIS_FPS", 5)
+    video_pipeline_mode: str = os.getenv("VIDEO_PIPELINE_MODE", "direct")
     video_pix_fmt: str = os.getenv("VIDEO_PIX_FMT", "bgr24")
     video_encoder: str = os.getenv("VIDEO_ENCODER", "libx264")
     video_encoder_preset: str | None = _optional("VIDEO_ENCODER_PRESET")

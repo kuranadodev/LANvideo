@@ -136,7 +136,9 @@ ffmpeg -hide_banner -encoders | grep h264_nvenc
 nvidia-smi
 ```
 
-注意：启用 `h264_nvenc` 只会把视频编码转到 NVIDIA 编码器。当前摄像头采集、Python/OpenCV 图像算法、BGR 帧写入 FFmpeg 的流程仍在 CPU 上。OpenCV CUDA 能力会在后端状态接口和状态面板中显示，但默认算法仍不依赖 CUDA。
+默认视频管线为 `VIDEO_PIPELINE_MODE=direct`：FFmpeg 直接从 V4L2 摄像头采集并推流，OpenCV 只按 `VIDEO_ANALYSIS_FPS` 抽帧运行算法，检测框/标签通过 WebSocket 发到前端 Canvas 叠加显示。若需要把 OpenCV 画框后的画面本身编码推流，可切回 `VIDEO_PIPELINE_MODE=opencv`。
+
+启用 `h264_nvenc` 只会把视频编码转到 NVIDIA 编码器；OpenCV 旁路算法、音频处理和前端指标推送仍在 CPU 上。若摄像头不支持被 FFmpeg 与 OpenCV 同时打开，直推模式会保留原始视频推流并在日志中提示旁路分析未启动。
 
 ### 音频指标占用过高
 
