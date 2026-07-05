@@ -67,6 +67,14 @@ class PipelineManager:
             settings.video_encoder,
             settings.video_encoder_preset,
             settings.video_bitrate,
+            settings.video_maxrate,
+            settings.video_bufsize,
+            settings.video_thread_queue_size,
+            settings.audio_thread_queue_size,
+            settings.video_rtsp_transport,
+            settings.video_low_latency_mode,
+            settings.video_analysis_width,
+            settings.video_analysis_height,
         )
 
     def rebuild_workers(self) -> None:
@@ -82,7 +90,7 @@ class PipelineManager:
         return {
             "running": running,
             "state": state,
-            "video": {"running": self.video_worker.running, "device": settings.video_device, "width": settings.video_width, "height": settings.video_height, "fps": settings.video_fps, "analysis_fps": settings.video_analysis_fps, "actual_fps": self.video_worker.actual_fps, "pipeline_mode": settings.video_pipeline_mode, "encoder": settings.video_encoder, "encoder_preset": settings.video_encoder_preset, "bitrate": settings.video_bitrate, "error": self.video_worker.error},
-            "audio": {"running": self.audio_worker.running, "device": settings.audio_device, "sample_rate": settings.audio_sample_rate, "channels": settings.audio_channels, "block_size": settings.audio_block_size, "playback_gain": settings.audio_playback_gain, "metrics_interval_ms": settings.audio_metrics_interval_ms, "error": self.audio_worker.error},
+            "video": {"running": self.video_worker.running, "device": settings.video_device, "width": settings.video_width, "height": settings.video_height, "fps": settings.video_fps, "analysis_fps": settings.video_analysis_fps, "actual_fps": self.video_worker.actual_fps, "pipeline_mode": settings.video_pipeline_mode, "encoder": settings.video_encoder, "encoder_preset": settings.video_encoder_preset, "bitrate": settings.video_bitrate, "maxrate": settings.video_maxrate, "bufsize": settings.video_bufsize, "thread_queue_size": settings.video_thread_queue_size, "low_latency_mode": settings.video_low_latency_mode, "rtsp_transport": settings.video_rtsp_transport, "analysis_width": settings.video_analysis_width, "analysis_height": settings.video_analysis_height, "error": self.video_worker.error},
+            "audio": {"running": self.audio_worker.running, "device": settings.audio_device, "sample_rate": settings.audio_sample_rate, "channels": settings.audio_channels, "block_size": settings.audio_block_size, "playback_gain": settings.audio_playback_gain, "metrics_interval_ms": settings.audio_metrics_interval_ms, "thread_queue_size": settings.audio_thread_queue_size, "error": self.audio_worker.error},
             "mediamtx": {"rtsp_url": settings.mediamtx_rtsp_url, "webrtc_url": settings.mediamtx_webrtc_url},
         }

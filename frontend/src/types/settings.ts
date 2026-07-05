@@ -9,6 +9,14 @@ export type AppSettings = {
   video_encoder: string;
   video_encoder_preset?: string | null;
   video_bitrate?: string | null;
+  video_maxrate?: string | null;
+  video_bufsize?: string | null;
+  video_thread_queue_size: number;
+  audio_thread_queue_size: number;
+  video_rtsp_transport: 'tcp' | 'udp';
+  video_low_latency_mode: boolean;
+  video_analysis_width?: number | null;
+  video_analysis_height?: number | null;
   audio_device?: number | string | null;
   audio_sample_rate: number;
   audio_channels: number;

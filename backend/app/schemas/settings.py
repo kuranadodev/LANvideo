@@ -12,6 +12,14 @@ class AppSettings(BaseModel):
     video_encoder: str = "libx264"
     video_encoder_preset: str | None = None
     video_bitrate: str | None = None
+    video_maxrate: str | None = None
+    video_bufsize: str | None = None
+    video_thread_queue_size: int = Field(16, ge=1, le=1024)
+    audio_thread_queue_size: int = Field(64, ge=1, le=1024)
+    video_rtsp_transport: str = Field("tcp", pattern="^(tcp|udp)$")
+    video_low_latency_mode: bool = True
+    video_analysis_width: int | None = Field(None, ge=1)
+    video_analysis_height: int | None = Field(None, ge=1)
     audio_device: int | str | None = None
     audio_sample_rate: int = Field(48000, ge=8000)
     audio_channels: int = Field(1, ge=1, le=8)

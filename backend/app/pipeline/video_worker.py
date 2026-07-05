@@ -173,6 +173,8 @@ class VideoWorker:
     def _run_direct(self) -> None:
         output_width = self.settings.video_width
         output_height = self.settings.video_height
+        analysis_width = self.publisher.video_analysis_width
+        analysis_height = self.publisher.video_analysis_height
         analysis_fps = max(1, int(getattr(self.settings, "video_analysis_fps", 5)))
         publisher = self.publisher
         publisher.on_log = lambda line: self._threadsafe_log("info", f"FFmpeg: {line}")
@@ -201,8 +203,8 @@ class VideoWorker:
                 if dt > 0:
                     fps = 1.0 / dt
                     self.actual_fps = 0.9 * self.actual_fps + 0.1 * fps if self.actual_fps else fps
-                self._threadsafe_publish({"type": "video.metrics", "fps": self.settings.video_fps, "analysis_fps": self.actual_fps, "frame_index": frame_index, "algorithm_ms": algorithm_ms, "width": output_width, "height": output_height})
-                self._threadsafe_publish({"type": "detection.boxes", "frame_index": frame_index, "boxes": [box.to_dict() for box in result.boxes], "source_width": output_width, "source_height": output_height})
+                self._threadsafe_publish({"type": "video.metrics", "fps": self.settings.video_fps, "analysis_fps": self.actual_fps, "frame_index": frame_index, "algorithm_ms": algorithm_ms, "width": output_width, "height": output_height, "analysis_width": analysis_width, "analysis_height": analysis_height})
+                self._threadsafe_publish({"type": "detection.boxes", "frame_index": frame_index, "boxes": [box.to_dict() for box in result.boxes], "source_width": analysis_width, "source_height": analysis_height})
         except Exception as exc:
             self.error = str(exc)
             self._threadsafe_log("error", f"直推视频管线异常: {exc}")
