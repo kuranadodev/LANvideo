@@ -176,43 +176,26 @@ class VideoWorker:
         analysis_fps = max(1, int(getattr(self.settings, "video_analysis_fps", 5)))
         publisher = self.publisher
         publisher.on_log = lambda line: self._threadsafe_log("info", f"FFmpeg: {line}")
-        cap = None
         try:
-            publisher.start_v4l2(self.settings.video_device, self.settings.video_fourcc)
+            publisher.start_v4l2_with_analysis(self.settings.video_device, self.settings.video_fourcc, analysis_fps)
             self.running = True
-            self._threadsafe_log("info", f"直推视频管线已启动，FFmpeg 直接采集 {self.settings.video_device}，OpenCV 分析 {analysis_fps}fps")
-            try:
-                cap = self._open_capture()
-            except Exception as exc:
-                self._threadsafe_log("warning", f"OpenCV 旁路分析未启动: {exc}；原始视频仍由 FFmpeg 直推")
+            self._threadsafe_log(
+                "info",
+                f"直推视频管线已启动，FFmpeg 单次采集 {self.settings.video_device}，并输出 {analysis_fps}fps 分析帧",
+            )
             algo_cls = VIDEO_ALGORITHMS.get(self.settings.video_algorithm, DummyVideoAlgorithm)
             algorithm = algo_cls()
             frame_index = 0
             last = time.monotonic()
-            next_analysis = 0.0
             while not self._stop:
                 if self.publisher.process and self.publisher.process.poll() is not None:
                     raise BrokenPipeError(f"FFmpeg 已退出{self.publisher._recent_error_context()}")
-                now = time.monotonic()
-                if not cap:
-                    time.sleep(0.2)
-                    continue
-                if now < next_analysis:
-                    time.sleep(min(0.02, next_analysis - now))
-                    continue
-                next_analysis = now + 1.0 / analysis_fps
-                ok, frame = cap.read()
-                if not ok:
-                    self._threadsafe_log("warning", "OpenCV 旁路读取视频帧失败")
-                    time.sleep(0.2)
-                    continue
-                frame_height, frame_width = frame.shape[:2]
-                if frame_width != output_width or frame_height != output_height:
-                    frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_AREA)
+                frame = publisher.read_analysis_frame()
                 start = time.monotonic()
                 result = algorithm.process(frame)
                 algorithm_ms = (time.monotonic() - start) * 1000
                 frame_index += 1
+                now = time.monotonic()
                 dt = now - last
                 last = now
                 if dt > 0:
@@ -225,7 +208,5 @@ class VideoWorker:
             self._threadsafe_log("error", f"直推视频管线异常: {exc}")
         finally:
             publisher.stop()
-            if cap:
-                cap.release()
             self.running = False
             self._threadsafe_log("info", "直推视频管线已停止")
