@@ -73,6 +73,8 @@ class FFmpegPublisher:
             hint = "；无法加载 CUDA 驱动库，请检查 NVIDIA 驱动"
         elif "no capable devices" in lower:
             hint = "；未发现可用的 NVIDIA 编码设备"
+        elif "device or resource busy" in lower or "resource busy" in lower:
+            hint = "；摄像头设备正被其他进程占用，请使用 sudo fuser -v /dev/video* 或 sudo lsof /dev/video* 排查"
         return f"；最近 FFmpeg 输出{hint}: {text}"
 
     def _audio_input_args(self, audio_read_fd: int) -> list[str]:
@@ -92,9 +94,15 @@ class FFmpegPublisher:
             return "h264"
         return fourcc.strip().lower() if fourcc else None
 
-    def _spawn(self, cmd: list[str], audio_read_fd: int, audio_write_fd: int) -> None:
+    def _spawn(self, cmd: list[str], audio_read_fd: int, audio_write_fd: int, *, stdin: bool = True, stdout: bool = False) -> None:
         try:
-            self.process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(audio_read_fd,))
+            self.process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
+                stdout=subprocess.PIPE if stdout else subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                pass_fds=(audio_read_fd,),
+            )
             self._audio_pipe = os.fdopen(audio_write_fd, "wb", buffering=0)
         finally:
             os.close(audio_read_fd)
@@ -120,6 +128,51 @@ class FFmpegPublisher:
             input_args.extend(["-input_format", input_format])
         cmd = [self.ffmpeg_path, *input_args, "-i", device, *self._audio_input_args(audio_read_fd), *self._video_encoder_args(), *self._audio_output_args(), "-f", "rtsp", self.rtsp_url]
         self._spawn(cmd, audio_read_fd, audio_write_fd)
+
+    def start_v4l2_with_analysis(self, device: str, fourcc: str | None = None, analysis_fps: int = 5) -> None:
+        self.stop()
+        audio_read_fd, audio_write_fd = os.pipe()
+        input_args = ["-thread_queue_size", "512", "-f", "v4l2", "-framerate", str(self.fps), "-video_size", f"{self.width}x{self.height}"]
+        input_format = self._v4l2_input_format(fourcc)
+        if input_format:
+            input_args.extend(["-input_format", input_format])
+        filter_complex = (
+            f"[0:v]split=2[vmain][vanalysis];"
+            f"[vanalysis]fps={max(1, analysis_fps)},scale={self.width}:{self.height},format=bgr24[raw]"
+        )
+        cmd = [
+            self.ffmpeg_path,
+            *input_args,
+            "-i",
+            device,
+            *self._audio_input_args(audio_read_fd),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[vmain]",
+            "-map",
+            "1:a",
+            *self._video_encoder_args(),
+            *self._audio_output_args(),
+            "-f",
+            "rtsp",
+            self.rtsp_url,
+            "-map",
+            "[raw]",
+            "-f",
+            "rawvideo",
+            "pipe:1",
+        ]
+        self._spawn(cmd, audio_read_fd, audio_write_fd, stdin=False, stdout=True)
+
+    def read_analysis_frame(self) -> np.ndarray:
+        if not self.process or not self.process.stdout or self.process.poll() is not None:
+            raise BrokenPipeError(f"FFmpeg 分析输出未运行{self._recent_error_context()}")
+        frame_size = self.width * self.height * 3
+        payload = self.process.stdout.read(frame_size)
+        if len(payload) != frame_size:
+            raise BrokenPipeError(f"FFmpeg 分析输出已中断{self._recent_error_context()}")
+        return np.frombuffer(payload, dtype=np.uint8).reshape((self.height, self.width, 3)).copy()
 
     def _drain_stderr(self) -> None:
         if not self.process or not self.process.stderr:
@@ -192,6 +245,11 @@ class FFmpegPublisher:
             if self.process.stdin:
                 try:
                     self.process.stdin.close()
+                except Exception:
+                    pass
+            if self.process.stdout:
+                try:
+                    self.process.stdout.close()
                 except Exception:
                     pass
             if self.process.poll() is None:

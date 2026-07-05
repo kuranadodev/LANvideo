@@ -136,9 +136,9 @@ ffmpeg -hide_banner -encoders | grep h264_nvenc
 nvidia-smi
 ```
 
-默认视频管线为 `VIDEO_PIPELINE_MODE=direct`：FFmpeg 直接从 V4L2 摄像头采集并推流，OpenCV 只按 `VIDEO_ANALYSIS_FPS` 抽帧运行算法，检测框/标签通过 WebSocket 发到前端 Canvas 叠加显示。若需要把 OpenCV 画框后的画面本身编码推流，可切回 `VIDEO_PIPELINE_MODE=opencv`。
+默认视频管线为 `VIDEO_PIPELINE_MODE=direct`：FFmpeg 单次打开 V4L2 摄像头，一路编码推流到 MediaMTX，另一路按 `VIDEO_ANALYSIS_FPS` 抽帧输出给 OpenCV 运行算法，检测框/标签通过 WebSocket 发到前端 Canvas 叠加显示。若需要把 OpenCV 画框后的画面本身编码推流，可切回 `VIDEO_PIPELINE_MODE=opencv`。
 
-启用 `h264_nvenc` 只会把视频编码转到 NVIDIA 编码器；OpenCV 旁路算法、音频处理和前端指标推送仍在 CPU 上。若摄像头不支持被 FFmpeg 与 OpenCV 同时打开，直推模式会保留原始视频推流并在日志中提示旁路分析未启动。
+启用 `h264_nvenc` 只会把视频编码转到 NVIDIA 编码器；OpenCV 算法、音频处理和前端指标推送仍在 CPU 上。
 
 ### 音频指标占用过高
 
