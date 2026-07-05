@@ -25,6 +25,14 @@ class FFmpegPublisher:
         video_encoder: str = "libx264",
         video_encoder_preset: str | None = None,
         video_bitrate: str | None = None,
+        video_maxrate: str | None = None,
+        video_bufsize: str | None = None,
+        video_thread_queue_size: int = 16,
+        audio_thread_queue_size: int = 64,
+        video_rtsp_transport: str = "tcp",
+        video_low_latency_mode: bool = True,
+        video_analysis_width: int | None = None,
+        video_analysis_height: int | None = None,
         on_log: Callable[[str], None] | None = None,
     ) -> None:
         self.ffmpeg_path = ffmpeg_path
@@ -39,6 +47,14 @@ class FFmpegPublisher:
         self.video_encoder = video_encoder
         self.video_encoder_preset = video_encoder_preset
         self.video_bitrate = video_bitrate
+        self.video_maxrate = video_maxrate
+        self.video_bufsize = video_bufsize
+        self.video_thread_queue_size = video_thread_queue_size
+        self.audio_thread_queue_size = audio_thread_queue_size
+        self.video_rtsp_transport = video_rtsp_transport
+        self.video_low_latency_mode = video_low_latency_mode
+        self.video_analysis_width = video_analysis_width or width
+        self.video_analysis_height = video_analysis_height or height
         self.on_log = on_log
         self.process: subprocess.Popen | None = None
         self._audio_pipe = None
@@ -59,6 +75,10 @@ class FFmpegPublisher:
             raise ValueError(f"不支持的视频编码器: {encoder}")
         if self.video_bitrate:
             args.extend(["-b:v", self.video_bitrate])
+        if self.video_maxrate:
+            args.extend(["-maxrate", self.video_maxrate])
+        if self.video_bufsize:
+            args.extend(["-bufsize", self.video_bufsize])
         return args
 
     def _recent_error_context(self) -> str:
@@ -78,10 +98,26 @@ class FFmpegPublisher:
         return f"；最近 FFmpeg 输出{hint}: {text}"
 
     def _audio_input_args(self, audio_read_fd: int) -> list[str]:
-        return ["-thread_queue_size", "512", "-f", "f32le", "-ar", str(self.audio_sample_rate), "-ac", str(self.audio_channels), "-i", f"pipe:{audio_read_fd}"]
+        return ["-thread_queue_size", str(self.audio_thread_queue_size), "-f", "f32le", "-ar", str(self.audio_sample_rate), "-ac", str(self.audio_channels), "-i", f"pipe:{audio_read_fd}"]
 
     def _audio_output_args(self) -> list[str]:
         return ["-c:a", "libopus", "-b:a", "96k", "-af", f"volume={self.audio_gain}"]
+
+
+    def _low_latency_input_args(self) -> list[str]:
+        if not self.video_low_latency_mode:
+            return []
+        return ["-fflags", "nobuffer", "-flags", "low_delay"]
+
+    def _rtsp_output_args(self) -> list[str]:
+        args: list[str] = []
+        transport = (self.video_rtsp_transport or "tcp").strip().lower()
+        if transport in {"tcp", "udp"}:
+            args.extend(["-rtsp_transport", transport])
+        if self.video_low_latency_mode:
+            args.extend(["-muxdelay", "0", "-muxpreload", "0", "-flush_packets", "1"])
+        args.extend(["-f", "rtsp", self.rtsp_url])
+        return args
 
     @staticmethod
     def _v4l2_input_format(fourcc: str | None) -> str | None:
@@ -116,29 +152,29 @@ class FFmpegPublisher:
     def start(self) -> None:
         self.stop()
         audio_read_fd, audio_write_fd = os.pipe()
-        cmd = [self.ffmpeg_path, "-thread_queue_size", "512", "-f", "rawvideo", "-pix_fmt", self.pix_fmt, "-s", f"{self.width}x{self.height}", "-r", str(self.fps), "-i", "-", *self._audio_input_args(audio_read_fd), *self._video_encoder_args(), *self._audio_output_args(), "-f", "rtsp", self.rtsp_url]
+        cmd = [self.ffmpeg_path, *self._low_latency_input_args(), "-thread_queue_size", str(self.video_thread_queue_size), "-f", "rawvideo", "-pix_fmt", self.pix_fmt, "-s", f"{self.width}x{self.height}", "-r", str(self.fps), "-i", "-", *self._audio_input_args(audio_read_fd), *self._video_encoder_args(), *self._audio_output_args(), *self._rtsp_output_args()]
         self._spawn(cmd, audio_read_fd, audio_write_fd)
 
     def start_v4l2(self, device: str, fourcc: str | None = None) -> None:
         self.stop()
         audio_read_fd, audio_write_fd = os.pipe()
-        input_args = ["-thread_queue_size", "512", "-f", "v4l2", "-framerate", str(self.fps), "-video_size", f"{self.width}x{self.height}"]
+        input_args = [*self._low_latency_input_args(), "-thread_queue_size", str(self.video_thread_queue_size), "-f", "v4l2", "-framerate", str(self.fps), "-video_size", f"{self.width}x{self.height}"]
         input_format = self._v4l2_input_format(fourcc)
         if input_format:
             input_args.extend(["-input_format", input_format])
-        cmd = [self.ffmpeg_path, *input_args, "-i", device, *self._audio_input_args(audio_read_fd), *self._video_encoder_args(), *self._audio_output_args(), "-f", "rtsp", self.rtsp_url]
+        cmd = [self.ffmpeg_path, *input_args, "-i", device, *self._audio_input_args(audio_read_fd), *self._video_encoder_args(), *self._audio_output_args(), *self._rtsp_output_args()]
         self._spawn(cmd, audio_read_fd, audio_write_fd)
 
     def start_v4l2_with_analysis(self, device: str, fourcc: str | None = None, analysis_fps: int = 5) -> None:
         self.stop()
         audio_read_fd, audio_write_fd = os.pipe()
-        input_args = ["-thread_queue_size", "512", "-f", "v4l2", "-framerate", str(self.fps), "-video_size", f"{self.width}x{self.height}"]
+        input_args = [*self._low_latency_input_args(), "-thread_queue_size", str(self.video_thread_queue_size), "-f", "v4l2", "-framerate", str(self.fps), "-video_size", f"{self.width}x{self.height}"]
         input_format = self._v4l2_input_format(fourcc)
         if input_format:
             input_args.extend(["-input_format", input_format])
         filter_complex = (
             f"[0:v]split=2[vmain][vanalysis];"
-            f"[vanalysis]fps={max(1, analysis_fps)},scale={self.width}:{self.height},format=bgr24[raw]"
+            f"[vanalysis]fps={max(1, analysis_fps)},scale={self.video_analysis_width}:{self.video_analysis_height},format=bgr24[raw]"
         )
         cmd = [
             self.ffmpeg_path,
@@ -154,9 +190,7 @@ class FFmpegPublisher:
             "1:a",
             *self._video_encoder_args(),
             *self._audio_output_args(),
-            "-f",
-            "rtsp",
-            self.rtsp_url,
+            *self._rtsp_output_args(),
             "-map",
             "[raw]",
             "-f",
@@ -168,11 +202,11 @@ class FFmpegPublisher:
     def read_analysis_frame(self) -> np.ndarray:
         if not self.process or not self.process.stdout or self.process.poll() is not None:
             raise BrokenPipeError(f"FFmpeg 分析输出未运行{self._recent_error_context()}")
-        frame_size = self.width * self.height * 3
+        frame_size = self.video_analysis_width * self.video_analysis_height * 3
         payload = self.process.stdout.read(frame_size)
         if len(payload) != frame_size:
             raise BrokenPipeError(f"FFmpeg 分析输出已中断{self._recent_error_context()}")
-        return np.frombuffer(payload, dtype=np.uint8).reshape((self.height, self.width, 3)).copy()
+        return np.frombuffer(payload, dtype=np.uint8).reshape((self.video_analysis_height, self.video_analysis_width, 3)).copy()
 
     def _drain_stderr(self) -> None:
         if not self.process or not self.process.stderr:

@@ -25,6 +25,14 @@ class Settings:
     video_encoder: str = os.getenv("VIDEO_ENCODER", "libx264")
     video_encoder_preset: str | None = _optional("VIDEO_ENCODER_PRESET")
     video_bitrate: str | None = _optional("VIDEO_BITRATE")
+    video_maxrate: str | None = _optional("VIDEO_MAXRATE")
+    video_bufsize: str | None = _optional("VIDEO_BUFSIZE")
+    video_thread_queue_size: int = _int("VIDEO_THREAD_QUEUE_SIZE", 16)
+    audio_thread_queue_size: int = _int("AUDIO_THREAD_QUEUE_SIZE", 64)
+    video_rtsp_transport: str = os.getenv("VIDEO_RTSP_TRANSPORT", "tcp")
+    video_low_latency_mode: bool = os.getenv("VIDEO_LOW_LATENCY_MODE", "1").lower() in {"1", "true", "yes", "on"}
+    video_analysis_width: int | None = int(os.getenv("VIDEO_ANALYSIS_WIDTH")) if os.getenv("VIDEO_ANALYSIS_WIDTH") else None
+    video_analysis_height: int | None = int(os.getenv("VIDEO_ANALYSIS_HEIGHT")) if os.getenv("VIDEO_ANALYSIS_HEIGHT") else None
     video_fourcc: str | None = _optional("VIDEO_FOURCC")
     audio_device: int | str | None = _optional("AUDIO_DEVICE")
     audio_sample_rate: int = _int("AUDIO_SAMPLE_RATE", 48000)
